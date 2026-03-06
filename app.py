@@ -80,6 +80,19 @@ with st.expander("📱 在 iOS / 手机端使用本应用", expanded=False):
     except Exception as e:
         st.caption("本机 IP 获取失败，请在电脑上运行 ipconfig 查看 IP，再在手机浏览器打开 http://你的IP:8501")
 
+# 仅用于排查云端 Secrets 读取问题（不输出任何密钥值）
+if st.query_params.get("debug") == "1":
+    with st.expander("🔧 部署调试（不含敏感值）", expanded=True):
+        st.write(f"IS_CLOUD_DEPLOY: {IS_CLOUD_DEPLOY}")
+        st.write(f"app_dir: {app_dir}")
+        st.write(f"STREAMLIT_APP_URL detected: {bool(STREAMLIT_APP_URL)}")
+        st.write(f"STREAMLIT_APP_URL (len): {len(STREAMLIT_APP_URL)}")
+        try:
+            keys = list(st.secrets.keys())  # type: ignore[attr-defined]
+            st.write("st.secrets keys:", keys)
+        except Exception:
+            st.write("无法读取 st.secrets.keys()（但不影响运行）")
+
 # Calendar / Tasks 读写权限（写权限用于在应用内添加、编辑、删除并同步到 Google）
 SCOPES = [
     "openid",
@@ -104,19 +117,39 @@ IS_CLOUD_DEPLOY = (
     or os.environ.get("CLOUD_DEPLOY", "").lower() in ("1", "true", "yes")
     or bool(os.environ.get("STREAMLIT_APP_URL"))
 )
+
+def _read_secret_str(key: str) -> str:
+    """从 st.secrets 读取字符串（兼容不同实现），取不到则返回空字符串。"""
+    v = None
+    try:
+        v = st.secrets[key]
+    except Exception:
+        v = None
+    if not v:
+        try:
+            v = st.secrets.get(key)
+        except TypeError:
+            try:
+                v = st.secrets.get(key, None)
+            except Exception:
+                v = None
+        except Exception:
+            v = None
+    if not v:
+        try:
+            v = getattr(st.secrets, key)
+        except Exception:
+            v = None
+    return str(v).strip() if v is not None else ""
+
+
 # 云端应用地址（Streamlit Cloud 在 Secrets 里用根级键 STREAMLIT_APP_URL 配置）
 _def_url = os.environ.get("STREAMLIT_APP_URL", "").strip()
 if not _def_url:
-    try:
-        for key in ("STREAMLIT_APP_URL", "streamlit_app_url"):
-            if hasattr(st.secrets, "get") and callable(st.secrets.get):
-                _def_url = (st.secrets.get(key) or "").strip()
-            if not _def_url and hasattr(st.secrets, key):
-                _def_url = str(getattr(st.secrets, key)).strip()
-            if _def_url:
-                break
-    except Exception:
-        pass
+    for key in ("STREAMLIT_APP_URL", "streamlit_app_url"):
+        _def_url = _read_secret_str(key)
+        if _def_url:
+            break
 STREAMLIT_APP_URL = (_def_url or "").rstrip("/")
 app_dir = _app_dir
 OAUTH_STATE_DIR = Path(tempfile.gettempdir()) / "myaiplanner_oauth"
