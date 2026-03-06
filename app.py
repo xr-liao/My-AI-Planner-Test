@@ -130,13 +130,24 @@ def _read_secret_str(key: str) -> str:
     return str(v).strip() if v is not None else ""
 
 
-# 云端应用地址（Streamlit Cloud 在 Secrets 里用根级键 STREAMLIT_APP_URL 配置）
+# 云端应用地址（Secrets 根级键在 Cloud 上可能不暴露，优先从 [google] 段内读 streamlit_app_url）
 _def_url = os.environ.get("STREAMLIT_APP_URL", "").strip()
 if not _def_url:
     for key in ("STREAMLIT_APP_URL", "streamlit_app_url"):
         _def_url = _read_secret_str(key)
         if _def_url:
             break
+if not _def_url:
+    try:
+        g = st.secrets.get("google") or getattr(st.secrets, "google", None)
+        if g is not None:
+            for k in ("streamlit_app_url", "STREAMLIT_APP_URL"):
+                v = g.get(k) if isinstance(g, dict) else getattr(g, k, None)
+                if v:
+                    _def_url = str(v).strip()
+                    break
+    except Exception:
+        pass
 STREAMLIT_APP_URL = (_def_url or "").rstrip("/")
 app_dir = _app_dir
 OAUTH_STATE_DIR = Path(tempfile.gettempdir()) / "myaiplanner_oauth"
