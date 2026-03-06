@@ -108,10 +108,13 @@ IS_CLOUD_DEPLOY = (
 _def_url = os.environ.get("STREAMLIT_APP_URL", "").strip()
 if not _def_url:
     try:
-        if hasattr(st.secrets, "get") and callable(st.secrets.get):
-            _def_url = (st.secrets.get("STREAMLIT_APP_URL") or "").strip()
-        if not _def_url and hasattr(st.secrets, "STREAMLIT_APP_URL"):
-            _def_url = str(st.secrets.STREAMLIT_APP_URL).strip()
+        for key in ("STREAMLIT_APP_URL", "streamlit_app_url"):
+            if hasattr(st.secrets, "get") and callable(st.secrets.get):
+                _def_url = (st.secrets.get(key) or "").strip()
+            if not _def_url and hasattr(st.secrets, key):
+                _def_url = str(getattr(st.secrets, key)).strip()
+            if _def_url:
+                break
     except Exception:
         pass
 STREAMLIT_APP_URL = (_def_url or "").rstrip("/")
@@ -130,13 +133,26 @@ GOOGLE_TOKEN_PATH = app_dir / "google_token.json"
 
 def _get_google_client_config_cloud():
     """云端从 secrets 或环境变量读取 Google OAuth 客户端配置（Web 应用类型）。"""
-    try:
-        s = st.secrets.get("google", {})
-        if isinstance(s, dict) and s.get("client_id") and s.get("client_secret"):
-            return s
+    def _from_obj(s):
+        if s is None:
+            return None
+        cid = s.get("client_id", None) if isinstance(s, dict) else getattr(s, "client_id", None)
+        csec = s.get("client_secret", None) if isinstance(s, dict) else getattr(s, "client_secret", None)
+        if cid and csec:
+            return {"client_id": str(cid).strip(), "client_secret": str(csec).strip()}
         if isinstance(s, dict) and s.get("web"):
-            w = s["web"]
-            return {"client_id": w["client_id"], "client_secret": w["client_secret"]}
+            return _from_obj(s["web"])
+        return None
+
+    try:
+        if getattr(st.secrets, "get", None):
+            out = _from_obj(st.secrets.get("google", {}))
+            if out:
+                return out
+        if hasattr(st.secrets, "google"):
+            out = _from_obj(st.secrets.google)
+            if out:
+                return out
     except Exception:
         pass
     cid = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
@@ -203,70 +219,61 @@ if not st.session_state.google_credentials and not IS_CLOUD_DEPLOY and GOOGLE_TO
 
 login_button = st.button("登录 Google")
 if login_button:
-    # ---------- 云端部署：重定向到 Google 授权，回调由上方逻辑处理 ----------
-    if IS_CLOUD_DEPLOY and STREAMLIT_APP_URL:
-        config = _get_google_client_config_cloud()
-        if not config:
-            st.error(
-                "云端部署需配置 Google OAuth：在「设置」→「Secrets」中添加 google.client_id 与 google.client_secret，"
-                "或设置环境变量 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET。"
-            )
-            st.stop()
-        redirect_uri = f"{STREAMLIT_APP_URL}/"
-        client_config = {
-            "installed": {
-                "client_id": config["client_id"],
-                "client_secret": config["client_secret"],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [redirect_uri],
-            }
-        }
-        try:
-            flow = InstalledAppFlow.from_client_config(
-                client_config, scopes=SCOPES, redirect_uri=redirect_uri
-            )
-            auth_url, state = flow.authorization_url(prompt="consent")
-            code_verifier = getattr(flow.oauth2session, "_code_verifier", None)
-            if code_verifier is None:
-                st.error("无法生成授权状态，请稍后重试。")
-                st.stop()
-            OAUTH_STATE_DIR.mkdir(parents=True, exist_ok=True)
-            state_file = OAUTH_STATE_DIR / f"{state}.json"
-            with open(state_file, "w", encoding="utf-8") as f:
-                json.dump({"code_verifier": code_verifier}, f)
-            st.info("请点击下方按钮前往 Google 完成授权，授权后将自动返回本应用。")
-            st.link_button("前往 Google 授权", auth_url, type="primary")
-            st.caption(f"回调地址（请在 Google 控制台添加）：{redirect_uri}")
-        except Exception as e:
-            st.error("发起云端登录失败")
-            st.exception(e)
-        st.stop()
-
-    # ---------- 本机：本地回调服务器 ----------
-    candidate_paths = [
-        app_dir / "client_secret.json",
-        app_dir / "client_secret.json.json",
-    ]
+    candidate_paths = [app_dir / "client_secret.json", app_dir / "client_secret.json.json"]
     client_secret_path = next((p for p in candidate_paths if p.exists()), None)
+    cloud_cfg = _get_google_client_config_cloud()
 
+    # ---------- 无本地文件时：优先用云端（Secrets + STREAMLIT_APP_URL）----------
     if client_secret_path is None:
-        cloud_cfg = _get_google_client_config_cloud()
+        if cloud_cfg and STREAMLIT_APP_URL:
+            config = cloud_cfg
+            redirect_uri = f"{STREAMLIT_APP_URL}/"
+            client_config = {
+                "installed": {
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [redirect_uri],
+                }
+            }
+            try:
+                flow = InstalledAppFlow.from_client_config(
+                    client_config, scopes=SCOPES, redirect_uri=redirect_uri
+                )
+                auth_url, state = flow.authorization_url(prompt="consent")
+                code_verifier = getattr(flow.oauth2session, "_code_verifier", None)
+                if code_verifier is None:
+                    st.error("无法生成授权状态，请稍后重试。")
+                    st.stop()
+                OAUTH_STATE_DIR.mkdir(parents=True, exist_ok=True)
+                state_file = OAUTH_STATE_DIR / f"{state}.json"
+                with open(state_file, "w", encoding="utf-8") as f:
+                    json.dump({"code_verifier": code_verifier}, f)
+                st.info("请点击下方按钮前往 Google 完成授权，授权后将自动返回本应用。")
+                st.link_button("前往 Google 授权", auth_url, type="primary")
+                st.caption(f"回调地址（请在 Google 控制台添加）：{redirect_uri}")
+            except Exception as e:
+                st.error("发起云端登录失败")
+                st.exception(e)
+            st.stop()
         if cloud_cfg and not STREAMLIT_APP_URL:
             st.error(
-                "**云端部署**：已检测到 Secrets 中的 Google 配置，但缺少 **STREAMLIT_APP_URL**。\n\n"
-                "请在 Streamlit Cloud 该应用的 **Settings** → **Secrets** 中，在现有内容**同一份 TOML** 里增加一行（根级键）：\n\n"
+                "**云端部署**：已检测到 Secrets 中的 [google]，但缺少 **STREAMLIT_APP_URL**。\n\n"
+                "请在 **Settings** → **Secrets** 的 TOML 里增加一行（与 [google] 同级）：\n\n"
                 "`STREAMLIT_APP_URL = \"https://my-ai-planner-test-4odzlhb4.streamlit.app\"`\n\n"
-                "（把地址换成你的应用真实地址，不要末尾斜杠）。保存后 **Reboot app**，再试登录。"
+                "保存后 **Reboot app**，再试登录。"
             )
             st.stop()
         st.error(
-            "找不到 Google OAuth 客户端密钥文件。请把 `client_secret.json` 放到和 `app.py` 同一目录。\n\n"
-            "**若已部署到 Streamlit Cloud**：请在应用 Settings → Secrets 的 TOML 中添加 `[google]` 的 `client_id`、`client_secret`，"
-            "以及根级键 `STREAMLIT_APP_URL = \"你的应用完整地址\"`（如 https://xxx.streamlit.app，不要末尾斜杠）。"
+            "找不到 Google OAuth 客户端密钥文件。\n\n"
+            "**Streamlit Cloud**：请在 Settings → Secrets 中添加 `[google]` 的 client_id、client_secret，"
+            "以及根级键 `STREAMLIT_APP_URL = \"你的应用地址\"`（如 https://xxx.streamlit.app）。"
         )
-        st.code(f"app.py 目录: {app_dir}\n已尝试查找:\n" + "\n".join(str(p) for p in candidate_paths))
+        st.code(f"app.py 目录: {app_dir}\n已尝试: " + ", ".join(str(p) for p in candidate_paths))
         st.stop()
+
+    # ---------- 本机：有 client_secret.json，用本地回调服务器 ----------
 
     flow = InstalledAppFlow.from_client_secrets_file(
         str(client_secret_path),
