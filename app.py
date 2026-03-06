@@ -286,8 +286,11 @@ if login_button:
                     client_config, scopes=SCOPES, redirect_uri=redirect_uri
                 )
                 auth_url, state = flow.authorization_url(prompt="consent")
-                code_verifier = getattr(flow.oauth2session, "_code_verifier", None)
-                if code_verifier is None:
+                # code_verifier 在 Flow 上（google_auth_oauthlib），不在 oauth2session._code_verifier
+                code_verifier = getattr(flow, "code_verifier", None) or getattr(
+                    flow.oauth2session, "_code_verifier", None
+                )
+                if not code_verifier:
                     st.error("无法生成授权状态，请稍后重试。")
                     st.stop()
                 OAUTH_STATE_DIR.mkdir(parents=True, exist_ok=True)
