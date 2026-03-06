@@ -97,12 +97,25 @@ OAUTH_PORTS_TO_TRY = [8765, 8766, 8767, 8768, 8769]
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 GOOGLE_API_TIMEOUT_SECONDS = 20
 
-# 云端部署：设为 1 或设置 STREAMLIT_APP_URL 后使用重定向 OAuth，不再依赖本地回调端口
+# 云端部署：路径含 /mount/src 视为 Streamlit Cloud；或显式设置 CLOUD_DEPLOY / STREAMLIT_APP_URL
+_app_dir = Path(__file__).resolve().parent
 IS_CLOUD_DEPLOY = (
-    os.environ.get("CLOUD_DEPLOY", "").lower() in ("1", "true", "yes")
+    "/mount/src" in str(_app_dir)
+    or os.environ.get("CLOUD_DEPLOY", "").lower() in ("1", "true", "yes")
     or bool(os.environ.get("STREAMLIT_APP_URL"))
 )
-STREAMLIT_APP_URL = (os.environ.get("STREAMLIT_APP_URL") or "").rstrip("/")  # 如 https://xxx.streamlit.app
+# 云端应用地址（Streamlit Cloud 在 Secrets 里用根级键 STREAMLIT_APP_URL 配置）
+_def_url = os.environ.get("STREAMLIT_APP_URL", "").strip()
+if not _def_url:
+    try:
+        if hasattr(st.secrets, "get") and callable(st.secrets.get):
+            _def_url = (st.secrets.get("STREAMLIT_APP_URL") or "").strip()
+        if not _def_url and hasattr(st.secrets, "STREAMLIT_APP_URL"):
+            _def_url = str(st.secrets.STREAMLIT_APP_URL).strip()
+    except Exception:
+        pass
+STREAMLIT_APP_URL = (_def_url or "").rstrip("/")
+app_dir = _app_dir
 OAUTH_STATE_DIR = Path(tempfile.gettempdir()) / "myaiplanner_oauth"
 # OpenAI 官方 API 模型与超时
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
@@ -112,7 +125,6 @@ OPENAI_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OPENAI_REQUEST_TIMEOUT_SECONDS
 if "google_credentials" not in st.session_state:
     st.session_state.google_credentials = None
 
-app_dir = Path(__file__).resolve().parent
 GOOGLE_TOKEN_PATH = app_dir / "google_token.json"
 
 
@@ -134,7 +146,7 @@ def _get_google_client_config_cloud():
     return None
 
 
-# ---------- 云端部署：处理 Google 回调（URL 带 code & state）----------
+# ---------- 云端部署：处理 Google 回调 ----------
 if IS_CLOUD_DEPLOY and STREAMLIT_APP_URL:
     _code = st.query_params.get("code")
     _state = st.query_params.get("state")
@@ -239,8 +251,19 @@ if login_button:
     client_secret_path = next((p for p in candidate_paths if p.exists()), None)
 
     if client_secret_path is None:
+        cloud_cfg = _get_google_client_config_cloud()
+        if cloud_cfg and not STREAMLIT_APP_URL:
+            st.error(
+                "**云端部署**：已检测到 Secrets 中的 Google 配置，但缺少 **STREAMLIT_APP_URL**。\n\n"
+                "请在 Streamlit Cloud 该应用的 **Settings** → **Secrets** 中，在现有内容**同一份 TOML** 里增加一行（根级键）：\n\n"
+                "`STREAMLIT_APP_URL = \"https://my-ai-planner-test-4odzlhb4.streamlit.app\"`\n\n"
+                "（把地址换成你的应用真实地址，不要末尾斜杠）。保存后 **Reboot app**，再试登录。"
+            )
+            st.stop()
         st.error(
-            "找不到 Google OAuth 客户端密钥文件。请把 `client_secret.json` 放到和 `app.py` 同一目录。"
+            "找不到 Google OAuth 客户端密钥文件。请把 `client_secret.json` 放到和 `app.py` 同一目录。\n\n"
+            "**若已部署到 Streamlit Cloud**：请在应用 Settings → Secrets 的 TOML 中添加 `[google]` 的 `client_id`、`client_secret`，"
+            "以及根级键 `STREAMLIT_APP_URL = \"你的应用完整地址\"`（如 https://xxx.streamlit.app，不要末尾斜杠）。"
         )
         st.code(f"app.py 目录: {app_dir}\n已尝试查找:\n" + "\n".join(str(p) for p in candidate_paths))
         st.stop()
