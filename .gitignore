@@ -1,0 +1,10 @@
+# 本地保存的 Google 授权，勿提交
+google_token.json
+# 密钥文件勿提交
+client_secret*.json
+.venv/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+# 开发日志可能含 API Key 等敏感信息，不提交
+开发日志.txt

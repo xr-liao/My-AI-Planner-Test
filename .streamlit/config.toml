@@ -1,0 +1,10 @@
+# 允许同一 WiFi 下的手机/其它设备访问（如 iOS 测试）
+# 默认仅本机可访问时使用：address = "127.0.0.1"
+[server]
+address = "0.0.0.0"
+port = 8501
+enableXsrfProtection = true
+
+# 可选：手机端访问时用浏览器获取的 WebSocket 可能更稳定
+[browser]
+gatherUsageStats = false
