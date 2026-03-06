@@ -80,19 +80,6 @@ with st.expander("📱 在 iOS / 手机端使用本应用", expanded=False):
     except Exception as e:
         st.caption("本机 IP 获取失败，请在电脑上运行 ipconfig 查看 IP，再在手机浏览器打开 http://你的IP:8501")
 
-# 仅用于排查云端 Secrets 读取问题（不输出任何密钥值）
-if st.query_params.get("debug") == "1":
-    with st.expander("🔧 部署调试（不含敏感值）", expanded=True):
-        st.write(f"IS_CLOUD_DEPLOY: {IS_CLOUD_DEPLOY}")
-        st.write(f"app_dir: {app_dir}")
-        st.write(f"STREAMLIT_APP_URL detected: {bool(STREAMLIT_APP_URL)}")
-        st.write(f"STREAMLIT_APP_URL (len): {len(STREAMLIT_APP_URL)}")
-        try:
-            keys = list(st.secrets.keys())  # type: ignore[attr-defined]
-            st.write("st.secrets keys:", keys)
-        except Exception:
-            st.write("无法读取 st.secrets.keys()（但不影响运行）")
-
 # Calendar / Tasks 读写权限（写权限用于在应用内添加、编辑、删除并同步到 Google）
 SCOPES = [
     "openid",
@@ -153,6 +140,19 @@ if not _def_url:
 STREAMLIT_APP_URL = (_def_url or "").rstrip("/")
 app_dir = _app_dir
 OAUTH_STATE_DIR = Path(tempfile.gettempdir()) / "myaiplanner_oauth"
+
+# 仅用于排查云端 Secrets 读取（?debug=1，不输出敏感值）
+if st.query_params.get("debug") == "1":
+    with st.expander("🔧 部署调试（不含敏感值）", expanded=True):
+        st.write("IS_CLOUD_DEPLOY:", IS_CLOUD_DEPLOY)
+        st.write("app_dir:", str(app_dir))
+        st.write("STREAMLIT_APP_URL 已读到:", bool(STREAMLIT_APP_URL), "，长度:", len(STREAMLIT_APP_URL))
+        try:
+            keys = list(st.secrets.keys())
+            st.write("st.secrets 根级 keys:", keys)
+        except Exception as e:
+            st.write("st.secrets.keys() 失败:", type(e).__name__)
+
 # OpenAI 官方 API 模型与超时
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-3.5-turbo")
