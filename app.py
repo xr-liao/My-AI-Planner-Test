@@ -234,7 +234,8 @@ if IS_CLOUD_DEPLOY and STREAMLIT_APP_URL:
                     )
                     _flow.oauth2session._state = _state
                     _flow.oauth2session._code_verifier = _saved["code_verifier"]
-                    _current_url = f"{STREAMLIT_APP_URL}/?{st.query_params.to_query_string()}"
+                    _qs = urlencode(dict(st.query_params)) if st.query_params else ""
+                    _current_url = f"{STREAMLIT_APP_URL}/?{_qs}" if _qs else f"{STREAMLIT_APP_URL}/"
                     _flow.fetch_token(authorization_response=_current_url)
                     st.session_state.google_credentials = _flow.credentials
                     _state_file.unlink(missing_ok=True)
